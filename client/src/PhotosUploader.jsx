@@ -1,4 +1,4 @@
-import axios from "axios";
+import axios from "./axios.js";
 import { useState } from "react";
 import Image from "./Image.jsx";
 
@@ -20,7 +20,7 @@ export default function PhotosUploader({ addedPhotos, onChange }) {
     for (let i = 0; i < files.length; i++) {
       data.append('photos', files[i]);
     }
-    axios.post('http://localhost:4000/api/upload', data, {
+    axios.post('/api/upload', data, {
       headers: { 'Content-type': 'multipart/form-data' }
     }).then(response => {
       const { data: filenames } = response;
