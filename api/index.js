@@ -25,14 +25,27 @@ const jwtSecret = 'fasefraw4r5r3wq45wdfgw34twdfg'; // Mantén tu secreto de JWT 
 const bucket = 'reservaciones-slw';
 
 // Middleware para permitir CORS desde el frontend
+const allowedOrigins = [
+  process.env.FRONTEND_URL, // Origen del frontend en producción
+  'http://127.0.0.1:5173', // Desarrollo local
+  'http://localhost:5173'  // Desarrollo local
+];
+
 app.use(cors({
   credentials: true,
-  origin: process.env.FRONTEND_URL || ['http://127.0.0.1:5173', 'http://localhost:5173'], // Usando la variable de entorno FRONTEND_URL
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true); // Permitir el origen
+    } else {
+      callback(new Error('Not allowed by CORS')); // Bloquear
+    }
+  },
 }));
 
 app.use(express.json());
 app.use(cookieParser());
 app.use('/uploads', express.static(__dirname + '/uploads'));
+
 
 // Función de subida a S3
 async function uploadToS3(path, originalFilename, mimetype) {
