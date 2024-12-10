@@ -46,7 +46,6 @@ app.use(express.json());
 app.use(cookieParser());
 app.use('/uploads', express.static(__dirname + '/uploads'));
 
-
 // Función de subida a S3
 async function uploadToS3(path, originalFilename, mimetype) {
   const client = new S3Client({
@@ -72,34 +71,34 @@ async function uploadToS3(path, originalFilename, mimetype) {
 // Función para obtener datos del usuario desde el token
 function getUserDataFromReq(req) {
   return new Promise((resolve, reject) => {
-    jwt.verify(req.cookies.token, jwtSecret, {}, async (err, userData) => {
-      if (err) throw err;
+    const token = req.cookies.token || req.headers.authorization?.split(' ')[1];
+    if (!token) {
+      return reject(new Error('Token no proporcionado'));
+    }
+    jwt.verify(token, jwtSecret, {}, (err, userData) => {
+      if (err) {
+        return reject(new Error('Token inválido'));
+      }
       resolve(userData);
     });
   });
 }
 
 // Rutas
-
-// Ruta de prueba para verificar la conexión
 app.get('/api/test', (req, res) => {
   mongoose.connect(process.env.MONGO_URL);
   res.json('test ok');
 });
 
-// Ruta para registro de usuario
 app.post('/api/register', async (req, res) => {
   mongoose.connect(process.env.MONGO_URL);
   const { name, email, password } = req.body;
 
   try {
-    // Verificar si el correo ya está registrado
     const existingUser = await User.findOne({ email });
     if (existingUser) {
       return res.status(409).json({ error: 'Email already in use' });
     }
-
-    // Crear el nuevo usuario si no existe
     const userDoc = await User.create({
       name,
       email,
@@ -112,50 +111,49 @@ app.post('/api/register', async (req, res) => {
   }
 });
 
-// Ruta de inicio de sesión
 app.post('/api/login', async (req, res) => {
   mongoose.connect(process.env.MONGO_URL);
   const { email, password } = req.body;
-  const userDoc = await User.findOne({ email });
-  if (userDoc) {
-    const passOk = bcrypt.compareSync(password, userDoc.password);
-    if (passOk) {
-      jwt.sign({
-        email: userDoc.email,
-        id: userDoc._id
-      }, jwtSecret, {}, (err, token) => {
-        if (err) throw err;
-        res.cookie('token', token).json(userDoc);
-      });
+  try {
+    const userDoc = await User.findOne({ email });
+    if (userDoc) {
+      const passOk = bcrypt.compareSync(password, userDoc.password);
+      if (passOk) {
+        jwt.sign({ email: userDoc.email, id: userDoc._id }, jwtSecret, {}, (err, token) => {
+          if (err) throw err;
+          res.cookie('token', token).json(userDoc);
+        });
+      } else {
+        res.status(422).json('pass not ok');
+      }
     } else {
-      res.status(422).json('pass not ok');
+      res.status(404).json('not found');
     }
-  } else {
-    res.json('not found');
+  } catch (err) {
+    console.error('Login error:', err.message);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// Ruta para obtener el perfil del usuario
-app.get('/api/profile', (req, res) => {
+app.get('/api/profile', async (req, res) => {
   mongoose.connect(process.env.MONGO_URL);
   const { token } = req.cookies;
-  if (token) {
-    jwt.verify(token, jwtSecret, {}, async (err, userData) => {
-      if (err) throw err;
-      const { name, email, _id } = await User.findById(userData.id);
-      res.json({ name, email, _id });
-    });
-  } else {
-    res.json(null);
+  try {
+    if (!token) return res.status(401).json({ error: 'No token provided' });
+
+    const userData = jwt.verify(token, jwtSecret);
+    const { name, email, _id } = await User.findById(userData.id);
+    res.json({ name, email, _id });
+  } catch (err) {
+    console.error('Profile error:', err.message);
+    res.status(401).json({ error: 'Invalid token' });
   }
 });
 
-// Ruta para cerrar sesión
 app.post('/api/logout', (req, res) => {
   res.cookie('token', '').json(true);
 });
 
-// Ruta para subir una imagen desde un enlace
 app.post('/api/upload-by-link', async (req, res) => {
   const { link } = req.body;
   const newName = 'photo' + Date.now() + '.jpg';
@@ -167,7 +165,6 @@ app.post('/api/upload-by-link', async (req, res) => {
   res.json(url);
 });
 
-// Middleware para manejar las fotos
 const photosMiddleware = multer({ dest: '/tmp' });
 app.post('/api/upload', photosMiddleware.array('photos', 100), async (req, res) => {
   const uploadedFiles = [];
@@ -179,43 +176,49 @@ app.post('/api/upload', photosMiddleware.array('photos', 100), async (req, res) 
   res.json(uploadedFiles);
 });
 
-// Ruta para crear un lugar
-app.post('/api/places', (req, res) => {
+app.post('/api/places', async (req, res) => {
   mongoose.connect(process.env.MONGO_URL);
-  const { token } = req.cookies;
-  const {
-    title, address, addedPhotos, description, price,
-    perks, extraInfo, checkIn, checkOut, maxGuests,
-  } = req.body;
-  jwt.verify(token, jwtSecret, {}, async (err, userData) => {
-    if (err) throw err;
+  try {
+    const userData = await getUserDataFromReq(req);
+    const { title, address, addedPhotos, description, price, perks, extraInfo, checkIn, checkOut, maxGuests } = req.body;
     const placeDoc = await Place.create({
       owner: userData.id, price,
       title, address, photos: addedPhotos, description,
       perks, extraInfo, checkIn, checkOut, maxGuests,
     });
     res.json(placeDoc);
-  });
+  } catch (err) {
+    console.error('Error creating place:', err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
-// Ruta para obtener los lugares de un usuario
-app.get('/api/user-places', (req, res) => {
+app.get('/api/user-places', async (req, res) => {
   mongoose.connect(process.env.MONGO_URL);
   const { token } = req.cookies;
-  jwt.verify(token, jwtSecret, {}, async (err, userData) => {
+  try {
+    const userData = await getUserDataFromReq(req);
     const { id } = userData;
     res.json(await Place.find({ owner: id }));
-  });
+  } catch (err) {
+    console.error('Error fetching user places:', err.message);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
-// Ruta para obtener los detalles de un lugar
 app.get('/api/places/:id', async (req, res) => {
   mongoose.connect(process.env.MONGO_URL);
   const { id } = req.params;
-  res.json(await Place.findById(id));
+  try {
+    const place = await Place.findById(id);
+    if (!place) return res.status(404).json({ error: 'Place not found' });
+    res.json(place);
+  } catch (err) {
+    console.error('Error fetching place details:', err.message);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
-// Ruta para actualizar los datos de un lugar
 app.put('/api/places', async (req, res) => {
   mongoose.connect(process.env.MONGO_URL);
   const { token } = req.cookies;
@@ -223,9 +226,11 @@ app.put('/api/places', async (req, res) => {
     id, title, address, addedPhotos, description,
     perks, extraInfo, checkIn, checkOut, maxGuests, price,
   } = req.body;
-  jwt.verify(token, jwtSecret, {}, async (err, userData) => {
-    if (err) throw err;
+  try {
+    const userData = await getUserDataFromReq(req);
     const placeDoc = await Place.findById(id);
+    if (!placeDoc) return res.status(404).json({ error: 'Place not found' });
+
     if (userData.id === placeDoc.owner.toString()) {
       placeDoc.set({
         title, address, photos: addedPhotos, description,
@@ -233,41 +238,55 @@ app.put('/api/places', async (req, res) => {
       });
       await placeDoc.save();
       res.json('ok');
+    } else {
+      res.status(403).json({ error: 'You are not the owner of this place' });
     }
-  });
+  } catch (err) {
+    console.error('Error updating place:', err.message);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
-// Ruta para obtener todos los lugares
 app.get('/api/places', async (req, res) => {
   mongoose.connect(process.env.MONGO_URL);
-  res.json(await Place.find());
+  try {
+    res.json(await Place.find());
+  } catch (err) {
+    console.error('Error fetching places:', err.message);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
-// Ruta para hacer una reserva
 app.post('/api/bookings', async (req, res) => {
   mongoose.connect(process.env.MONGO_URL);
-  const userData = await getUserDataFromReq(req);
-  const {
-    place, checkIn, checkOut, numberOfGuests, name, phone, price,
-  } = req.body;
-  Booking.create({
-    place, checkIn, checkOut, numberOfGuests, name, phone, price,
-    user: userData.id,
-  }).then((doc) => {
-    res.json(doc);
-  }).catch((err) => {
-    throw err;
-  });
+  try {
+    const userData = await getUserDataFromReq(req);
+    const {
+      place, checkIn, checkOut, numberOfGuests, name, phone, price,
+    } = req.body;
+    const booking = await Booking.create({
+      place, checkIn, checkOut, numberOfGuests, name, phone, price,
+      user: userData.id,
+    });
+    res.json(booking);
+  } catch (err) {
+    console.error('Error creating booking:', err.message);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
-// Ruta para obtener las reservas de un usuario
 app.get('/api/bookings', async (req, res) => {
   mongoose.connect(process.env.MONGO_URL);
-  const userData = await getUserDataFromReq(req);
-  res.json(await Booking.find({ user: userData.id }).populate('place'));
+  try {
+    const userData = await getUserDataFromReq(req);
+    const bookings = await Booking.find({ user: userData.id }).populate('place');
+    res.json(bookings);
+  } catch (err) {
+    console.error('Error fetching bookings:', err.message);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 app.listen(process.env.PORT, () => {
   console.log(`App listening on port ${process.env.PORT}`);
 });
-
