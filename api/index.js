@@ -71,7 +71,7 @@ async function uploadToS3(path, originalFilename, mimetype) {
 // Función para obtener datos del usuario desde el token
 function getUserDataFromReq(req) {
   return new Promise((resolve, reject) => {
-    const token = req.cookies.token || req.headers.authorization?.split(' ')[1];
+    const token = req.cookies?.token || req.headers?.authorization?.split(' ')[1];
     if (!token) {
       return reject(new Error('Token no proporcionado'));
     }
@@ -137,11 +137,8 @@ app.post('/api/login', async (req, res) => {
 
 app.get('/api/profile', async (req, res) => {
   mongoose.connect(process.env.MONGO_URL);
-  const { token } = req.cookies;
   try {
-    if (!token) return res.status(401).json({ error: 'No token provided' });
-
-    const userData = jwt.verify(token, jwtSecret);
+    const userData = await getUserDataFromReq(req);
     const { name, email, _id } = await User.findById(userData.id);
     res.json({ name, email, _id });
   } catch (err) {
@@ -182,9 +179,17 @@ app.post('/api/places', async (req, res) => {
     const userData = await getUserDataFromReq(req);
     const { title, address, addedPhotos, description, price, perks, extraInfo, checkIn, checkOut, maxGuests } = req.body;
     const placeDoc = await Place.create({
-      owner: userData.id, price,
-      title, address, photos: addedPhotos, description,
-      perks, extraInfo, checkIn, checkOut, maxGuests,
+      owner: userData.id,
+      price,
+      title,
+      address,
+      photos: addedPhotos,
+      description,
+      perks,
+      extraInfo,
+      checkIn,
+      checkOut,
+      maxGuests,
     });
     res.json(placeDoc);
   } catch (err) {
@@ -195,7 +200,6 @@ app.post('/api/places', async (req, res) => {
 
 app.get('/api/user-places', async (req, res) => {
   mongoose.connect(process.env.MONGO_URL);
-  const { token } = req.cookies;
   try {
     const userData = await getUserDataFromReq(req);
     const { id } = userData;
@@ -221,7 +225,6 @@ app.get('/api/places/:id', async (req, res) => {
 
 app.put('/api/places', async (req, res) => {
   mongoose.connect(process.env.MONGO_URL);
-  const { token } = req.cookies;
   const {
     id, title, address, addedPhotos, description,
     perks, extraInfo, checkIn, checkOut, maxGuests, price,
@@ -261,9 +264,7 @@ app.post('/api/bookings', async (req, res) => {
   mongoose.connect(process.env.MONGO_URL);
   try {
     const userData = await getUserDataFromReq(req);
-    const {
-      place, checkIn, checkOut, numberOfGuests, name, phone, price,
-    } = req.body;
+    const { place, checkIn, checkOut, numberOfGuests, name, phone, price } = req.body;
     const booking = await Booking.create({
       place, checkIn, checkOut, numberOfGuests, name, phone, price,
       user: userData.id,
@@ -271,7 +272,7 @@ app.post('/api/bookings', async (req, res) => {
     res.json(booking);
   } catch (err) {
     console.error('Error creating booking:', err.message);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(err.message === 'Token no proporcionado' ? 401 : 500).json({ error: err.message });
   }
 });
 
@@ -287,6 +288,8 @@ app.get('/api/bookings', async (req, res) => {
   }
 });
 
-app.listen(process.env.PORT, () => {
-  console.log(`App listening on port ${process.env.PORT}`);
+// Inicia el servidor
+app.listen(process.env.PORT || 4000, () => {
+  console.log(`Server is running on port ${process.env.PORT || 4000}`);
 });
+
