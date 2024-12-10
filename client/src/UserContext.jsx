@@ -8,22 +8,36 @@ export function UserContextProvider({ children }) {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    if (!user) {
-      axios
-        .get('/api/profile')
-        .then(({ data }) => {
-          if (data) {
-            setUser(data); // Asignar datos válidos del usuario
-          }
-        })
-        .catch((error) => {
-          console.error("Error fetching profile:", error);
-        })
-        .finally(() => {
-          setReady(true); // Siempre marca como listo, incluso si falla
-        });
-    }
-  }, [user]);
+    const fetchProfile = async () => {
+      const token = localStorage.getItem('token');
+      if (!token) {
+        setReady(true);
+        return;
+      }
+
+      try {
+        // Adjuntar el token a las solicitudes si existe
+        axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+        
+        const { data } = await axios.get('/api/profile');
+        setUser(data); // Asignar datos válidos del usuario
+      } catch (error) {
+        if (error.response?.status === 401) {
+          // Token inválido o expirado
+          console.error("Token inválido. Cerrando sesión.");
+          localStorage.removeItem('token');
+          setUser(null);
+          window.location.href = '/login'; // Redirigir al login
+        } else {
+          console.error("Error al obtener el perfil:", error);
+        }
+      } finally {
+        setReady(true);
+      }
+    };
+
+    fetchProfile();
+  }, []);
 
   return (
     <UserContext.Provider value={{ user, setUser, ready }}>

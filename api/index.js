@@ -121,7 +121,12 @@ app.post('/api/login', async (req, res) => {
       if (passOk) {
         jwt.sign({ email: userDoc.email, id: userDoc._id }, jwtSecret, {}, (err, token) => {
           if (err) throw err;
-          res.cookie('token', token).json(userDoc);
+          // Aquí se añaden las configuraciones de las cookies
+          res.cookie('token', token, {
+            httpOnly: true,  // No permite acceso al token desde JavaScript en el frontend
+            secure: process.env.NODE_ENV === 'production',  // Solo habilitar 'secure' en producción (cuando uses HTTPS)
+            sameSite: 'None',  // Permite el envío de la cookie en solicitudes cross-origin
+          }).json(userDoc);
         });
       } else {
         res.status(422).json('pass not ok');
@@ -148,7 +153,7 @@ app.get('/api/profile', async (req, res) => {
 });
 
 app.post('/api/logout', (req, res) => {
-  res.cookie('token', '').json(true);
+  res.cookie('token', '', { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'None' }).json(true);
 });
 
 app.post('/api/upload-by-link', async (req, res) => {
@@ -292,4 +297,3 @@ app.get('/api/bookings', async (req, res) => {
 app.listen(process.env.PORT || 4000, () => {
   console.log(`Server is running on port ${process.env.PORT || 4000}`);
 });
-
